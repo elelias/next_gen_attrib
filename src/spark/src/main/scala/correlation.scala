@@ -14,12 +14,15 @@ object CorrelationApp {
    import spark.sql
 
    val txns_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/txns.db/txns_with_xid_parquet/dt=2017-07-01"
-   val mktng_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/marketing_event_parquet/data_source=rover/dt=2017-07-01"
-   
+
+   val mktng_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/marketing_events_non_null_uid_parquet"
+      
    val txns_df = spark.read.load(txns_path)
-   val mktng_df = spark.read.load(mktng_path).filter("user_id is not null")
+   //#val mktng_df = spark.read.load(mktng_path).filter("user_id is not null")
+   //val mktng_df = spark.read.format("orc").load(mktng_path).filter("user_id is not null")
    
-   
+   val mktng_df  = spark.read.load(mktng_path)
+
    txns_df.createOrReplaceTempView("txns")
    mktng_df.createOrReplaceTempView("mktng")
 
@@ -93,15 +96,16 @@ object CorrelationApp {
 
    FROM  txns B
    inner join  mktng A
-
    on    A.user_id = B.buyer_id
 
-   and   A.event_ts <= B.bbowa_event_timestamp
+   where   A.dt <= B.dt 
+   and   A.event_dt <= B.bbowa_session_start_dt
+   and   A.event_ts <= B.bbowa_event_timestamp 
    """
    
    val join_df = sql(query)
 
-   join_df.write.save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/correlation_test.parquet")
+   join_df.write.save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/correlation_rover_non_null_uid.parquet")
 
    spark.stop()
   }
