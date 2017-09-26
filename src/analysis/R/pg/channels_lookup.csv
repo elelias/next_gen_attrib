@@ -1,0 +1,18 @@
+channel_id,channel_name
+NULL,NULL
+1,Display
+2,Paid Search
+3,Natural Search
+6,epn
+9,Shopping Comparison
+13,Social Media
+15,Partner Integration
+16,Others
+18,Exclusion
+19,Unassigned
+23,Partner Integration - Organic
+25,Paid Search - Brand
+26,Natural Search - Gbase
+27,Shopping Comparison  - SDC
+40,marketing_emails
+50,site_emails
