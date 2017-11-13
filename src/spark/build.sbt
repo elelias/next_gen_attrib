@@ -1,4 +1,4 @@
-name := "correlation"
+name := "marketing_events_txns_correlation"
 
 version := "1.0"
 

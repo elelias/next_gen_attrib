@@ -20,6 +20,14 @@ library(htmlwidgets)
 library(highcharter)
 library(plotly)
 
+cnts <- dbGetQuery(conn = hopper, "Select channel_name, day_diff, sum(cnt) as cnt from P_TRAFFIC_T.DP_TESTING_MOVER where event_type_id in (1, 5, 7) group by 1, 2")
+
+excluded <- cnts %>% group_by(channel_name) %>% arrange(day_diff) %>% mutate(cumm_cnt=cumsum(cnt)) %>% 
+  select(channel_name, day_diff, cumm_cnt) %>% filter(day_diff==61) %>% arrange(cumm_cnt) %>% select(-day_diff) %>% 
+  filter(cumm_cnt < 1000000) %>%  select(channel_name) %>% unlist()
+
+excluded <- c(excluded, "NULL", "isNA")
+
 ```
 
 ## Marketing Events
@@ -29,31 +37,32 @@ library(plotly)
 We start with plotting the relative proportions of all marketing events (clicks, impressions, opens, ...) happening in all channels over a given time window.
 
 ```{r marketing_events, echo=FALSE, message=FALSE, warning=FALSE}
-mktng_events <- dbGetQuery(conn = hopper, "select * from P_attribution_T.pg_agg_mktng_evts_v4;")
+mktng_events <- dbGetQuery(conn = hopper, "select * from P_attribution_T.pg_agg_mktng_evts_v5;")
 mktng_events <- mktng_events %>% select(-dt)
 mktng_events$event_dt <- as.Date(mktng_events$event_dt)
 mktng_events$channel_id <- as.factor(mktng_events$channel_id)
 mktng_events$event_type_id <- as.factor(mktng_events$event_type_id)
 mktng_events$experience_level2 <- as.factor(mktng_events$experience_level2)
 mktng_events$device_level2 <- as.factor(mktng_events$device_level2)
-
-channels_lookup <- read.csv(file = "channels_lookup.csv")
-channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
-channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
-
-mktng_events <- left_join(mktng_events, channels_lookup)
+# 
+# channels_lookup <- read.csv(file = "channels_lookup.csv")
+# channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+# channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+# 
+# mktng_events <- left_join(mktng_events, channels_lookup)
 
 events_by_date <- mktng_events %>% 
                                     select(-event_type_id) %>% 
                                     group_by(event_dt, channel_name) %>% 
                                     summarise(no_events = sum(no_events))
 
-ds <- lapply(levels(events_by_date$channel_name),
+ds <- lapply(unique(events_by_date$channel_name),
              function(x){
                  list(data = (events_by_date %>% 
                                       filter(channel_name == x) %>% 
                                       arrange(event_dt))$no_events,
-                      name = x)
+                      name = x,
+                      visibility = !(x %in% excluded))
              })
 
 hc <- highchart() %>% 
@@ -67,10 +76,11 @@ hc <- highchart() %>%
            tickmarkPlacement = "on",
            title = list(text = "Date of Marketing Event")) %>% 
   hc_yAxis(title = list(text = "Percent")) %>% 
-  hc_tooltip(pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
-             <b>{point.percentage:.1f}%</b> ({point.y:,.0f} events)",
-              crosshairs = TRUE, 
-          borderWidth = 3, 
+  hc_tooltip(headerFormat = '{point.key} days <table>',
+             pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
+                            <b>{point.percentage:.1f}%</b> ({point.y:,.0f} events)",
+             crosshairs = TRUE, 
+             borderWidth = 3, 
           #sort = TRUE, 
           table = TRUE) %>% 
   hc_plotOptions(area = list(
@@ -403,21 +413,24 @@ From a marketing channel viewpoint
 
 ``` {r txns_by_channel, echo=FALSE, message=FALSE, warning=FALSE}
 
-cnts <- dbGetQuery(conn = hopper, "Select channel_name, day_diff, sum(cnt) as cnt from P_TRAFFIC_T.DP_TESTING_MOVER where event_type_id in (1, 5, 7) group by 1, 2")
+
 # cnts2 <- cnts
 cnts %<>% group_by(channel_name) %>% mutate(prcnt=round(cnt/sum(cnt)*100, 1)) %>% ungroup()
 cnts$channel_name[is.na(cnts$channel_name)] <- "isNA"
 
 
-cnts3 <- cnts %>% group_by(channel_name) %>% 
-  mutate(cumm_cnt=cumsum(cnt), cumm_prcnt=cumsum(prcnt)) %>% 
+cnts3 <- cnts %>% group_by(channel_name) %>% arrange(day_diff) %>% mutate(cumm_cnt=cumsum(cnt)) %>% 
   select(channel_name, day_diff, cumm_cnt) %>% spread(channel_name, cumm_cnt)
 
 
 
-hchart(cnts %>% arrange(channel_name, day_diff) %>% group_by(channel_name)  %>% 
-         mutate(cumm_cnt=cumsum(cnt), cumm_prcnt=cumsum(prcnt))
-       ,"line", hcaes(x = day_diff, y = cumm_prcnt, group = channel_name)) %>% 
+hchart(cnts %>% arrange(channel_name, day_diff) %>% group_by(channel_name) %>% 
+         mutate(cumm_cnt=cumsum(cnt), cumm_prcnt=cumsum(prcnt)),
+       "line", 
+       hcaes(x = day_diff, 
+             y = cumm_prcnt, 
+             group = channel_name),
+       visible = !(unique((cnts %>% arrange(channel_name))$channel_name) %in% excluded)) %>% 
   hc_xAxis(title = list(text = "Days from Marketing event to first BBOWAC event")) %>% 
   hc_yAxis(title = list(text = "Cummulative % Correlated Transactions"), max = 100) %>% 
   hc_exporting(enabled = TRUE)
@@ -432,7 +445,7 @@ Examining the number of correlated transactions by lookback window
 ```{r lookback_window, echo=FALSE, message=FALSE, warning=FALSE}
 hc <- highchart() %>% hc_chart(type = "column") %>% hc_xAxis(categories = " ")
 for(x in names(cnts3)[-1]){
-  hc <- hc %>% hc_add_series(name = x, visible = ifelse(x=="isNA", FALSE, TRUE),
+  hc <- hc %>% hc_add_series(name = x, visible = ifelse(x %in% excluded, FALSE, TRUE),
                              data = list(list(sequence =    setNames(unlist(cnts3[x]), NULL)    )))
 }
 hc <- hc %>% hc_motion(enabled = TRUE, labels = 0:61, 
@@ -468,3 +481,23 @@ datatable(
   formatRound(names(averageClicksBySegment)[-1], 1)
 
 ```
+
+### Transactions
+
+``` {r transactions, echo=FALSE, message=FALSE, warning=FALSE}
+averageClicksBySegment <- read_csv("~/projects/next_gen_attribution/src/analysis/R/pg/transactions.csv")
+
+datatable(
+     averageClicksBySegment,
+    rownames = FALSE,
+    # caption = 'Table 1: This is a simple caption for the table.',
+    extensions = 'Buttons',
+    options = list(
+      columnDefs = list(list(autoWidth = TRUE, className = 'dt-left', targets = c(0))),
+      pageLength = 50,
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv')
+    ))  %>%
+  formatRound(names(averageClicksBySegment)[2], 0)%>%
+  formatRound(names(averageClicksBySegment)[3], 2)
+
