@@ -1,0 +1,503 @@
+---
+title: "Next Generation Attibution"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+<div style="text-align: right"><i><h5>Dimitris Psaradellis, Pavol Gurican, Elias Ron, Rachael Maltiel-Swenson</h5></i></div>
+
+```{r libraries, echo=FALSE, message=FALSE}
+setwd("~/projects/next_gen_attribution/src/analysis/R/pg")
+
+source("~/R_connector/libraries.R")
+#mozart <- connToEDW(dataBase = "Mozart", connType = 'normal', user = 'pgurican', pass=trimws(read_file("~/R_connector/p.txt")))
+hopper <- connToEDW(dataBase = "Hopper", connType = 'normal', user = 'pgurican', pass=trimws(read_file("~/R_connector/p.txt")))
+
+library(htmlwidgets)
+library(highcharter)
+library(plotly)
+
+cnts <- dbGetQuery(conn = hopper, "Select channel_name, day_diff, sum(cnt) as cnt from P_TRAFFIC_T.DP_TESTING_MOVER where event_type_id in (1, 5, 7) group by 1, 2")
+
+excluded <- cnts %>% group_by(channel_name) %>% arrange(day_diff) %>% mutate(cumm_cnt=cumsum(cnt)) %>% 
+  select(channel_name, day_diff, cumm_cnt) %>% filter(day_diff==61) %>% arrange(cumm_cnt) %>% select(-day_diff) %>% 
+  filter(cumm_cnt < 1000000) %>%  select(channel_name) %>% unlist()
+
+excluded <- c(excluded, "NULL", "isNA")
+
+```
+
+## Marketing Events
+
+### All Events
+
+We start with plotting the relative proportions of all marketing events (clicks, impressions, opens, ...) happening in all channels over a given time window.
+
+```{r marketing_events, echo=FALSE, message=FALSE, warning=FALSE}
+mktng_events <- dbGetQuery(conn = hopper, "select * from P_attribution_T.pg_agg_mktng_evts_v5;")
+mktng_events <- mktng_events %>% select(-dt)
+mktng_events$event_dt <- as.Date(mktng_events$event_dt)
+mktng_events$channel_id <- as.factor(mktng_events$channel_id)
+mktng_events$event_type_id <- as.factor(mktng_events$event_type_id)
+mktng_events$experience_level2 <- as.factor(mktng_events$experience_level2)
+mktng_events$device_level2 <- as.factor(mktng_events$device_level2)
+# 
+# channels_lookup <- read.csv(file = "channels_lookup.csv")
+# channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+# channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+# 
+# mktng_events <- left_join(mktng_events, channels_lookup)
+
+events_by_date <- mktng_events %>% 
+                                    select(-event_type_id) %>% 
+                                    group_by(event_dt, channel_name) %>% 
+                                    summarise(no_events = sum(no_events))
+
+ds <- lapply(unique(events_by_date$channel_name),
+             function(x){
+                 list(data = (events_by_date %>% 
+                                      filter(channel_name == x) %>% 
+                                      arrange(event_dt))$no_events,
+                      name = x,
+                      visibility = !(x %in% excluded))
+             })
+
+hc <- highchart() %>% 
+  hc_chart(type = "area") %>% 
+  hc_title(text = "Proportion of marketing events per channel") %>% 
+  hc_subtitle(text = "Next Generation Attribution") %>% 
+  hc_xAxis(categories = seq(from = as.Date("2017-05-01"),
+                            to = as.Date("2017-07-01"),
+                            by = 1),
+                       #(unique(events_by_date$event_dt)),
+           tickmarkPlacement = "on",
+           title = list(text = "Date of Marketing Event")) %>% 
+  hc_yAxis(title = list(text = "Percent")) %>% 
+  hc_tooltip(headerFormat = '{point.key} days <table>',
+             pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
+                            <b>{point.percentage:.1f}%</b> ({point.y:,.0f} events)",
+             crosshairs = TRUE, 
+             borderWidth = 3, 
+          #sort = TRUE, 
+          table = TRUE) %>% 
+  hc_plotOptions(area = list(
+     stacking = "percent",
+     lineColor = "#ffffff",
+     lineWidth = 1,
+     marker = list(
+       lineWidth = 1,
+       lineColor = "#ffffff"
+       ))
+     ) %>%
+    hc_add_series_list(ds) %>%
+  hc_size(height = 700) %>% 
+  hc_exporting(
+    enabled = TRUE
+  )
+```
+
+```{r plot_mktng_events, echo=FALSE, warning=FALSE}
+hc
+```
+
+The second plot shows the same information, but in absolute scale.
+
+```{r plot_absolute_mktng_events, echo=FALSE, warning=FALSE, message=FALSE}
+hc <- highchart() %>% 
+  hc_chart(type = "area") %>% 
+  hc_title(text = "Absolute numbers of marketing events per channel") %>% 
+  hc_subtitle(text = "Next Generation Attribution") %>% 
+  hc_xAxis(categories = as.Date(seq(from = as.Date("2017-05-01"),
+                            to = as.Date("2017-07-01"),
+                            by = 1)),
+                       #(unique(events_by_date$event_dt)),
+           tickmarkPlacement = "on",
+           title = list(text = "Date of Marketing Event")) %>% 
+  hc_yAxis(title = list(text = "Number of Events")) %>% 
+  hc_tooltip(pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
+             <b>{point.percentage:.1f}%</b> ({point.y:,.0f} events)",
+             shared = TRUE,
+              crosshairs = TRUE, 
+          borderWidth = 3, 
+          #sort = TRUE, 
+          table = TRUE) %>% 
+  hc_plotOptions(area = list(
+     stacking = "normal",
+     lineColor = "#ffffff",
+     lineWidth = 1,
+     marker = list(
+       lineWidth = 1,
+       lineColor = "#ffffff"
+       ))
+     ) %>%
+    hc_add_series_list(ds)  %>%
+    hc_size(height = 700) %>% 
+  hc_exporting(
+    enabled = TRUE
+  )
+
+hc
+```
+
+### Clicks only
+
+```{r marketing_events_clicks, echo=FALSE, message=FALSE, warning=FALSE}
+mktng_events <- dbGetQuery(conn = hopper, "select * from P_attribution_T.pg_agg_mktng_evts_v4 where event_type_id in (1,5,7);")
+mktng_events <- mktng_events %>% select(-dt)
+mktng_events$event_dt <- as.Date(mktng_events$event_dt)
+mktng_events$channel_id <- as.factor(mktng_events$channel_id)
+mktng_events$event_type_id <- as.factor(mktng_events$event_type_id)
+mktng_events$experience_level2 <- as.factor(mktng_events$experience_level2)
+mktng_events$device_level2 <- as.factor(mktng_events$device_level2)
+
+channels_lookup <- read.csv(file = "channels_lookup.csv")
+channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+
+mktng_events <- left_join(mktng_events, channels_lookup)
+
+events_by_date <- mktng_events %>% 
+                                    select(-event_type_id) %>% 
+                                    group_by(event_dt, channel_name) %>% 
+                                    summarise(no_events = sum(no_events))
+
+ds <- lapply(levels(events_by_date$channel_name),
+             function(x){
+                 list(data = (events_by_date %>% 
+                                      filter(channel_name == x) %>% 
+                                      arrange(event_dt))$no_events,
+                      name = x)
+             })
+
+hc <- highchart() %>% 
+  hc_chart(type = "area") %>% 
+  hc_title(text = "Proportion of clicks per channel") %>% 
+  hc_subtitle(text = "Next Generation Attribution") %>% 
+  hc_xAxis(categories = seq(from = as.Date("2017-05-01"),
+                            to = as.Date("2017-07-01"),
+                            by = 1),
+                       #(unique(events_by_date$event_dt)),
+           tickmarkPlacement = "on",
+           title = list(text = "Date of Click")) %>% 
+  hc_yAxis(title = list(text = "Percent")) %>% 
+  hc_tooltip(pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
+             <b>{point.percentage:.1f}%</b> ({point.y:,.0f} events)",
+              crosshairs = TRUE, 
+          borderWidth = 3, 
+          #sort = TRUE, 
+          table = TRUE) %>% 
+  hc_plotOptions(area = list(
+     stacking = "percent",
+     lineColor = "#ffffff",
+     lineWidth = 1,
+     marker = list(
+       lineWidth = 1,
+       lineColor = "#ffffff"
+       ))
+     ) %>%
+    hc_add_series_list(ds) %>%
+  hc_size(height = 700) %>% 
+  hc_exporting(
+    enabled = TRUE
+  )
+
+hc
+```
+
+## Marketing events with correlations to transactions
+
+### Relative importances of channels with or without transactions
+
+``` {r plot_proportions, echo=FALSE, message=FALSE, warning=FALSE}
+mktng_events <- dbGetQuery(conn = hopper, "select * from P_attribution_T.pg_agg_mktng_evts_v3;")
+mktng_events <- mktng_events %>% select(-dt)
+
+mktng_events$event_dt <- as.Date(mktng_events$event_dt)
+mktng_events$channel_id <- as.factor(mktng_events$channel_id)
+mktng_events$event_type_id <- as.factor(mktng_events$event_type_id)
+mktng_events$experience_level2 <- as.factor(mktng_events$experience_level2)
+mktng_events$device_level2 <- as.factor(mktng_events$device_level2)
+
+channels_lookup <- read.csv(file = "channels_lookup.csv")
+channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+
+mktng_events <- left_join(mktng_events, channels_lookup)
+
+mktng_events_prop <- mktng_events %>% 
+        select(-event_type_id, channel_id) %>% 
+        group_by(event_dt, channel_name) %>% 
+        summarise(daily_events_channel = sum(no_events)) %>%
+        ungroup(channel_name) %>%
+        group_by(event_dt) %>%
+        mutate(daily_events = sum(daily_events_channel)) %>%
+        mutate(prop_evts = daily_events_channel/daily_events*100) %>%
+        arrange(event_dt, channel_name)
+
+
+mktng_events_07_01 <- dbGetQuery(conn = hopper, "select * from P_attribution_T.mktng_txns_v4_bbowa_07_01;")
+
+mktng_events_07_01 <- mktng_events_07_01 %>% select(-dt)
+mktng_events_07_01$event_dt <- as.Date(mktng_events_07_01$event_dt)
+mktng_events_07_01$channel_id <- as.factor(mktng_events_07_01$channel_id)
+mktng_events_07_01$event_type_id <- as.factor(mktng_events_07_01$event_type_id)
+mktng_events_07_01$experience_level2 <- as.factor(mktng_events_07_01$experience_level2)
+mktng_events_07_01$device_level2 <- as.factor(mktng_events_07_01$device_level2)
+channels_lookup <- read.csv(file = "channels_lookup.csv")
+channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+
+mktng_events_07_01 <- left_join(mktng_events_07_01, channels_lookup)
+
+mktng_events_txns_daily_prop_07_01 <- mktng_events_07_01 %>% 
+        select(-event_type_id, channel_id) %>% 
+        group_by(event_dt, channel_name) %>% 
+        summarise(daily_events_channel = sum(no_events)) %>%
+        ungroup(channel_name) %>%
+        group_by(event_dt) %>%
+        mutate(daily_events = sum(daily_events_channel)) %>%
+        mutate(prop_evts_txns = daily_events_channel/daily_events*100) %>%
+        arrange(event_dt, channel_name)
+
+proportions <- left_join(mktng_events_txns_daily_prop_07_01 %>%
+                                select(event_dt,
+                                       channel_name,
+                                       prop_evts_txns),
+                         mktng_events_prop %>% select(event_dt,
+                                                      channel_name,
+                                                      prop_evts),
+                         by = c('event_dt', 'channel_name'))
+
+hc <- hchart(proportions,
+             type = "line",
+             hcaes(x = event_dt,
+                   y = prop_evts_txns/prop_evts,
+                   group = channel_name)) %>%
+        hc_xAxis(title = list(text = "Date of the Marketing Event")) %>%
+        hc_yAxis(title = list(text = "Ratio")) %>%
+        hc_title(text = "Relative proportion of traffic tied to a BBOWAC event on 07/01 attributed to channel with respect to overall marketing-driven traffic.") %>%
+        hc_tooltip( pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
+            <b>{point.y:,.2f}x</b>",
+             #shared = TRUE
+          crosshairs = TRUE, 
+          borderWidth = 3, 
+          sort = TRUE, 
+          table = TRUE) %>% 
+        hc_size(height = 700) %>% 
+  hc_exporting(
+    enabled = TRUE
+  )
+
+hc
+
+
+```
+
+``` {r plot_proportions2, echo=FALSE, message=FALSE, warning=FALSE}
+mktng_events <- dbGetQuery(conn = hopper, "select * from P_attribution_T.pg_agg_mktng_evts_v3;")
+mktng_events <- mktng_events %>% select(-dt)
+
+mktng_events$event_dt <- as.Date(mktng_events$event_dt)
+mktng_events$channel_id <- as.factor(mktng_events$channel_id)
+mktng_events$event_type_id <- as.factor(mktng_events$event_type_id)
+mktng_events$experience_level2 <- as.factor(mktng_events$experience_level2)
+mktng_events$device_level2 <- as.factor(mktng_events$device_level2)
+
+channels_lookup <- read.csv(file = "channels_lookup.csv")
+channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+
+mktng_events <- left_join(mktng_events, channels_lookup)
+
+mktng_events_prop <- mktng_events %>% 
+        select(-event_type_id, channel_id) %>% 
+        group_by(event_dt, channel_name) %>% 
+        summarise(daily_events_channel = sum(no_events)) %>%
+        ungroup(channel_name) %>%
+        group_by(event_dt) %>%
+        mutate(daily_events = sum(daily_events_channel)) %>%
+        mutate(prop_evts = daily_events_channel/daily_events*100) %>%
+        arrange(event_dt, channel_name)
+
+
+mktng_events_06_22 <- dbGetQuery(conn = hopper, "select * from P_attribution_T.mktng_txns_v4_bbowa_06_22;")
+
+mktng_events_06_22 <- mktng_events_06_22 %>% select(-dt)
+mktng_events_06_22$event_dt <- as.Date(mktng_events_06_22$event_dt)
+mktng_events_06_22$channel_id <- as.factor(mktng_events_06_22$channel_id)
+mktng_events_06_22$event_type_id <- as.factor(mktng_events_06_22$event_type_id)
+mktng_events_06_22$experience_level2 <- as.factor(mktng_events_06_22$experience_level2)
+mktng_events_06_22$device_level2 <- as.factor(mktng_events_06_22$device_level2)
+channels_lookup <- read.csv(file = "channels_lookup.csv")
+channels_lookup$channel_id <- as.factor(channels_lookup$channel_id)
+channels_lookup$channel_name <- as.factor(channels_lookup$channel_name)
+
+mktng_events_06_22 <- left_join(mktng_events_06_22, channels_lookup)
+
+mktng_events_txns_daily_prop_06_22 <- mktng_events_06_22 %>% 
+        select(-event_type_id, channel_id) %>% 
+        group_by(event_dt, channel_name) %>% 
+        summarise(daily_events_channel = sum(no_events)) %>%
+        ungroup(channel_name) %>%
+        group_by(event_dt) %>%
+        mutate(daily_events = sum(daily_events_channel)) %>%
+        mutate(prop_evts_txns = daily_events_channel/daily_events*100) %>%
+        arrange(event_dt, channel_name)
+
+proportions2 <- left_join(mktng_events_txns_daily_prop_06_22 %>%
+                                select(event_dt,
+                                       channel_name,
+                                       prop_evts_txns),
+                         mktng_events_prop %>% select(event_dt,
+                                                      channel_name,
+                                                      prop_evts),
+                         by = c('event_dt', 'channel_name'))
+
+hc <- hchart(proportions2,
+             type = "line",
+             hcaes(x = event_dt,
+                   y = prop_evts_txns/prop_evts,
+                   group = channel_name)) %>%
+        hc_xAxis(title = list(text = "Date of the Marketing Event")) %>%
+        hc_yAxis(title = list(text = "Ratio")) %>%
+        hc_title(text = "Relative proportion of traffic tied to a BBOWAC event on 06/22 attributed to channel with respect to overall marketing-driven traffic.") %>%
+        hc_tooltip( pointFormat = "<br/><span style=\"color:{series.color}\">{series.name}</span>:
+            <b>{point.y:,.2f}x</b>",
+             #shared = TRUE
+          crosshairs = TRUE, 
+          borderWidth = 3, 
+          sort = TRUE, 
+          table = TRUE) %>% 
+        hc_size(height = 700) %>% 
+  hc_exporting(
+    enabled = TRUE
+  )
+
+hc
+
+
+```
+
+## Correlated Transactions
+
+The average number of clicks for correlated transaction is **3.31** with a 1-day window, **4.05** for a 7-day window and **6.26** for a window of one month. 
+
+Detailed breakdown according to the marketing channel can be found below.
+
+``` {r correlated_txns, echo=FALSE, message=FALSE, warning=FALSE}
+require(DT)
+averageClicks <- read_csv("~/projects/next_gen_attribution/src/analysis/R/pg/averageClicks.csv")
+names(averageClicks)[1] <- "channel_name"
+
+datatable(
+    averageClicks,
+    rownames = FALSE,
+    # caption = 'Table 1: This is a simple caption for the table.',
+    extensions = 'Buttons',
+    options = list(
+      columnDefs = list(list(autoWidth = TRUE, className = 'dt-left', targets = c(0))),
+      pageLength = 50,
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv')
+    )) %>%
+  formatRound(names(averageClicks)[-1], 2)
+
+```
+
+### Lookback period overview
+
+From a marketing channel viewpoint
+
+``` {r txns_by_channel, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+# cnts2 <- cnts
+cnts %<>% group_by(channel_name) %>% mutate(prcnt=round(cnt/sum(cnt)*100, 1)) %>% ungroup()
+cnts$channel_name[is.na(cnts$channel_name)] <- "isNA"
+
+
+cnts3 <- cnts %>% group_by(channel_name) %>% arrange(day_diff) %>% mutate(cumm_cnt=cumsum(cnt)) %>% 
+  select(channel_name, day_diff, cumm_cnt) %>% spread(channel_name, cumm_cnt)
+
+
+
+hchart(cnts %>% arrange(channel_name, day_diff) %>% group_by(channel_name) %>% 
+         mutate(cumm_cnt=cumsum(cnt), cumm_prcnt=cumsum(prcnt)),
+       "line", 
+       hcaes(x = day_diff, 
+             y = cumm_prcnt, 
+             group = channel_name),
+       visible = !(unique((cnts %>% arrange(channel_name))$channel_name) %in% excluded)) %>% 
+  hc_xAxis(title = list(text = "Days from Marketing event to first BBOWAC event")) %>% 
+  hc_yAxis(title = list(text = "Cummulative % Correlated Transactions"), max = 100) %>% 
+  hc_exporting(enabled = TRUE)
+
+
+
+```
+
+
+Examining the number of correlated transactions by lookback window
+
+```{r lookback_window, echo=FALSE, message=FALSE, warning=FALSE}
+hc <- highchart() %>% hc_chart(type = "column") %>% hc_xAxis(categories = " ")
+for(x in names(cnts3)[-1]){
+  hc <- hc %>% hc_add_series(name = x, visible = ifelse(x %in% excluded, FALSE, TRUE),
+                             data = list(list(sequence =    setNames(unlist(cnts3[x]), NULL)    )))
+}
+hc <- hc %>% hc_motion(enabled = TRUE, labels = 0:61, 
+                       series = 1:(length(names(cnts3)[-1])-1))
+hc
+```
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+### Average number of clicks by channel and FM segment
+
+Looking at the average number of clicks by channel and FM segment
+
+``` {r avg_clicks_per_FM_segment, echo=FALSE, message=FALSE, warning=FALSE}
+averageClicksBySegment <- read_csv("~/projects/next_gen_attribution/src/analysis/R/pg/bySegments.csv")
+
+datatable(
+     averageClicksBySegment,
+    rownames = FALSE,
+    # caption = 'Table 1: This is a simple caption for the table.',
+    extensions = 'Buttons',
+    options = list(
+      columnDefs = list(list(autoWidth = TRUE, className = 'dt-left', targets = c(0))),
+      pageLength = 50,
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv')
+    ))  %>%
+  formatRound(names(averageClicksBySegment)[-1], 1)
+
+```
+
+### Transactions
+
+``` {r transactions, echo=FALSE, message=FALSE, warning=FALSE}
+averageClicksBySegment <- read_csv("~/projects/next_gen_attribution/src/analysis/R/pg/transactions.csv")
+
+datatable(
+     averageClicksBySegment,
+    rownames = FALSE,
+    # caption = 'Table 1: This is a simple caption for the table.',
+    extensions = 'Buttons',
+    options = list(
+      columnDefs = list(list(autoWidth = TRUE, className = 'dt-left', targets = c(0))),
+      pageLength = 50,
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv')
+    ))  %>%
+  formatRound(names(averageClicksBySegment)[2], 0)%>%
+  formatRound(names(averageClicksBySegment)[3], 2)
+
