@@ -84,10 +84,6 @@ object PathAnalysis2App {
       "gmb_usd")
       .agg(countDistinct($"event_id") as "path_length",
            collect_list(struct("event_id", "channel_name")) as "mktng_events")
-  
-    u.createOrReplaceTempView("grouped_paths")
-
-    val v = u
       .filter($"path_length" <= 60)
       .withColumn("coocurences", coocurences_udf($"mktng_events"))
       .select($"path_length", 
@@ -95,7 +91,7 @@ object PathAnalysis2App {
       .groupBy("path_length")
       .agg(coocurences_aggregation_udf(collect_list($"coocurences")) as "coocurence_pairs")
       
-    v.write.option("sep","\t").mode("overwrite").csv("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/path_analysis_v2/coocurence_pairs_by_length/ck_dt=2017-11-01")
+    u.write.option("sep","\t").mode("overwrite").csv("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/path_analysis_v2/coocurence_pairs_by_length/ck_dt=2017-11-01")
 
     spark.stop()
   }
