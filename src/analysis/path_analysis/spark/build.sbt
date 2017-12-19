@@ -1,4 +1,4 @@
-name := "preparing_graph"
+name := "channel_analysis_display"
 
 version := "1.0"
 
