@@ -42,7 +42,7 @@ object ChannelPairs {
         groupBy("channel_name", "previous_channel_name", "step").
         count().withColumnRenamed("count", "weight")
 
-    weighted_edges.write.options(Map("sep" -> "\t", "header" -> "true")).mode("ignore")
+    weighted_edges.write.options(Map("sep" -> "\t", "header" -> "true")).mode("ignore").csv("hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/weighted_edges")
 
     spark.stop()
   }
