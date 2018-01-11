@@ -24,7 +24,7 @@ object ChannelPairs {
     coalesce(transaction_id, -1) as transaction_id,
     coalesce(item_id, -1) as item_id,
     event_ts,
-	  coalesce(channel_name, "unassigned")
+	  coalesce(channel_name, "unassigned") as channel_name
     from sample""")
 
 
