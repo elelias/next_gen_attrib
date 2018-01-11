@@ -15,9 +15,7 @@ object ChannelPairs {
 
     txns_df.createOrReplaceTempView("sample")
 
-    /*
-	Select relevant marketing-related info from the table. 
-    */
+	 // Select relevant marketing-related info from the table.
     val marketing_info = sql(
       """select
     distinct
@@ -25,11 +23,8 @@ object ChannelPairs {
     coalesce(item_id, -1) as item_id,
     event_ts,
 	  coalesce(channel_name, "unassigned") as channel_name
+    where event_type_id <> 4
     from sample""")
-
-
-    marketing_info.createOrReplaceTempView("marketing_info")
-
 
     val window = Window.partitionBy("transaction_id", "item_id").orderBy("event_ts")
     val pairs = marketing_info.withColumn("previous_channel_name", lag("channel_name", 1, null).over(window)).withColumn("rank", rank().over(window))
