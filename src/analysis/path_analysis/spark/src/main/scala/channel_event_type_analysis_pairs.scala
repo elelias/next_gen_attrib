@@ -26,8 +26,8 @@ object ChannelPairs {
     val window = Window.partitionBy("transaction_id", "item_id").orderBy("event_ts")
     val pairs =
       marketing_info.
+        withColumn("previous_event_type", lag("event_type", 1, null).over(window)).
         withColumn("previous_channel_name", lag("channel_name", 1, null).over(window)).
-        where($"previous_channel_name".isNotNull).
         withColumn("step", rank().over(window))
 
     val channel_pairs_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/channel_pairs"
@@ -39,7 +39,7 @@ object ChannelPairs {
 
     val weighted_edges =
       spark.read.option("sep", "\t").parquet(channel_pairs_path).
-        groupBy("channel_name", "event_type", "previous_channel_name", "step").
+        groupBy("channel_name", "event_type", "previous_channel_name", "previous_event_type", "step").
         count().withColumnRenamed("count", "weight")
 
     weighted_edges.write.mode("overwrite").parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/weighted_edges")
