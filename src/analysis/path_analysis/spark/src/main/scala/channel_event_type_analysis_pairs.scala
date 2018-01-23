@@ -94,7 +94,7 @@ object ChannelPairs {
     //val pairs = marketing_info.
     //withColumn("previous", lag("current", 1, null).over(partition_by_checkout_order_by_timestamp)).
     //withColumn("step", rank().over(partition_by_checkout_order_by_timestamp))
-
+    
     
     val chrono_pairs = marketing_info.
     withColumn("next", lead("current", 1, null).over(partition_by_checkout_order_by_timestamp)).
