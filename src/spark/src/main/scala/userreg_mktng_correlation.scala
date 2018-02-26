@@ -105,6 +105,7 @@ object UserRegCorrelationApp {
    B.idfa                  as reg_idfa,
    B.gadid                 as reg_gadid,
    B.gdid                  as reg_gdid,
+   B.device_id             as device_id,
    B.device_type           as reg_device_type,
    B.device_type_level1    as reg_device_type_level1,
    B.device_type_level2    as reg_device_type_level2,
@@ -166,12 +167,11 @@ object UserRegCorrelationApp {
    sql(common_join_sql+cguid_query_tail).createOrReplaceTempView("cguid_join")
    sql(common_join_sql+did_query_tail).createOrReplaceTempView("did_join")
    sql(common_join_sql+did_query_tail).createOrReplaceTempView("xid_join")
-
-
-
-
-
-
+   //
+   //
+   //
+   //
+   //
    val full_join_sql = """
    select
    coalesce(A.guid,B.guid,C.guid) as guid,
@@ -234,8 +234,8 @@ object UserRegCorrelationApp {
    coalesce(A.reg_day_diff,B.reg_day_diff,C.reg_day_diff)        as reg_day_diff,
    coalesce(A.sec_day_diff,B.sec_day_diff,C.sec_day_diff)  as sec_day_diff,
    coalesce(A.join_strategy, B.join_strategy, C.join_strategy) as join_strategy,
-   coalesce(A.reg_user_cre_dt,B.reg_user_cre_dt,C.reg_user_cre_dt)  as mktng_dt
-
+   coalesce(A.reg_user_cre_dt,B.reg_user_cre_dt,C.reg_user_cre_dt)  as reg_dt,
+   coalesce(A.event_dt,B.event_dt,C.event_dt)  as mktng_dt
    
    FROM             did_join        A
    FULL OUTER JOIN  cguid_join      B
@@ -250,12 +250,10 @@ object UserRegCorrelationApp {
 
    val full_join_df = spark.sql(full_join_sql)
 
-
    full_join_df
    .write
-   .partitionBy("mktng_dt")
+   .partitionBy("reg_dt", "mktng_dt")
    .mode(SaveMode.Append)
-   .save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/registration_mktng_correlation")
-
+   .save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/registration_mktng_corr")
  }
 }

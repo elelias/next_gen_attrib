@@ -19,10 +19,13 @@ object ChannelPairs {
     import org.apache.spark.sql.expressions.{Window, WindowSpec}
     import org.apache.spark.sql.Column
 
-    val transactions_sample = spark.read.load("hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/me_txns_correlation_subsample")
-    
+    val txn_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/me_txns_correlation_20171101"
+    val transactions_sample = spark.read.load(txn_path)
+    //
+    //
     transactions_sample.createOrReplaceTempView("txns")
-    
+    //
+    //
     val valid_transaction: Column = $"transaction_id".isNotNull and $"item_id".isNotNull
     val click: Column = $"event_type_id".isin(1, 5, 7, 8)
     val open: Column = $"event_type_id" === 6
@@ -34,6 +37,7 @@ object ChannelPairs {
     val device_pcTouch: Column = $"bbowa_device_type" === "PC: Touch"
     val channel_epn: Column = $"channel_name" === "epn"
     val channel_display: Column = $"channel_name" === "Display"
+    val no_organic: Column = $"current.channel_name" !== "organic" and $"current.channel_name" !== "site_emails"
 
 
     val partition_by_checkout_order_by_timestamp: WindowSpec =
@@ -53,6 +57,7 @@ object ChannelPairs {
     display_brock.createOrReplaceTempView("brock")
 
 
+    
     val query = """    
     select 
     A.*,
@@ -62,6 +67,16 @@ object ChannelPairs {
     on A.rotation_id = B.rotation_id    
     """
     val mktng_with_brock_df = sql(query)
+
+
+
+
+
+    mktng_with_brock_df.write.mode("overwrite").parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/mktng_with_brock_df")
+
+
+
+    
 
 
 
@@ -80,7 +95,8 @@ object ChannelPairs {
 	.as("bbowa_device")
       ).as("transaction"),
 	
-      $"event_ts",     
+      $"event_ts",
+      $"event_id",
 
       struct(
         when(click, "click").when(open, "open").otherwise("undefined").as("event_type"),
@@ -91,23 +107,57 @@ object ChannelPairs {
       ).as("current")     
     ).where(valid_transaction and not(impression))
 
-    //val pairs = marketing_info.
-    //withColumn("previous", lag("current", 1, null).over(partition_by_checkout_order_by_timestamp)).
-    //withColumn("step", rank().over(partition_by_checkout_order_by_timestamp))
-    
-  
     
 
 
-  
+
+
+
+
+
+
+
+    marketing_info.cache()
+    marketing_info.write.mode("overwrite").parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/attrib.db/marketing_info")
+
+    
+    val no_organic_df = marketing_info.where(no_organic)
+
+    val ordered_info = marketing_info.
+    groupBy("transaction_id", "item_id", "transaction").
+    agg(countDistinct($"event_id") as "path_length",
+	 sort_array(collect_list(struct("event_ts", "event_id", "current"))) as "mktng_events"
+       ).
+    filter($"path_length" <= 100)
+
+
+    ordered_info.cache()
+    
+    
     val chrono_pairs = marketing_info.
     withColumn("next", lead("current", 1, null).over(partition_by_checkout_order_by_timestamp)).
-    withColumn("step", rank().over(partition_by_checkout_order_by_reversed_timestamp))//
+    withColumn("forward_step", rank().over(partition_by_checkout_order_by_timestamp)).
+    withColumn("previous", lag("current", 1, null).over(partition_by_checkout_order_by_reversed_timestamp)).
+    withColumn("backward_step", rank().over(partition_by_checkout_order_by_reversed_timestamp))
+    //
+    //
 
-//    withColumn("inverse_step", rank().over(partition_by_checkout_order_by_timestamp))
 
+
+
+    val chrono_events = chrono_pairs.
+    groupBy("transaction_id", "item_id", "transaction").
+    agg(countDistinct($"event_id") as "path_length",
+	sort_array(collect_list(struct("event_ts", "event_id", "current.channel_name","current.sub_channel","previous.channel_name","previous.sub_channel", "backward_step","next.channel_name","next.sub_channel", "forward_step"))) as "mktng_events"
+      )
+    
     
 
+
+
+
+
+    
 
     val weighted_edges =
       chrono_pairs.
