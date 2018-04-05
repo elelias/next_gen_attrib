@@ -4,7 +4,7 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark.storage.StorageLevel
 
 
-object UserRegCorrelationApp {
+object UserRegCorrelationAppTest {
 
  def main(args: Array[String]) {
    
@@ -35,7 +35,7 @@ object UserRegCorrelationApp {
 
 
    val mktng_path = s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/marketing_events_parquet"
-   val user_reg_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db__"
+   val user_reg_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/user_regristration_xid_parquet"
 
 
    //LOAD FRAMES
@@ -49,6 +49,7 @@ object UserRegCorrelationApp {
    reg_df.cache()
    reg_df.createOrReplaceTempView("reg_xid")
    mktng_df.createOrReplaceTempView("mktng")
+
 
 
 
@@ -104,7 +105,7 @@ object UserRegCorrelationApp {
    B.idfa                  as reg_idfa,
    B.gadid                 as reg_gadid,
    B.gdid                  as reg_gdid,
-   B.device_id             as reg_device_id,
+   B.device_id             as device_id,
    B.device_type           as reg_device_type,
    B.device_type_level1    as reg_device_type_level1,
    B.device_type_level2    as reg_device_type_level2,
@@ -132,7 +133,7 @@ object UserRegCorrelationApp {
    val did_query_tail = """
    "did"                 as join_strategy
 
-   FROM        mktng_non_null_did      A
+     FROM        mktng_non_null_did      A
    INNER JOIN  reg_xid_non_null_did    B
    on          A.device_id = B.device_id
    
@@ -149,7 +150,7 @@ object UserRegCorrelationApp {
    INNER JOIN  reg_xid_non_null_xid    B
    on          A.incdata_id = B.incdata_id
    
-   where (A.event_dt  <= B.user_cre_dt)
+   where (A.event_dt   <= B.user_cre_dt)
    and  (datediff(B.user_cre_dt, A.event_dt) <= 14)
    and  (unix_timestamp(A.event_ts) <= unix_timestamp(B.user_cre_ts) + 600)
    and  (unix_timestamp(B.user_cre_ts) - unix_timestamp(A.event_ts) <= 14*86400)
@@ -165,12 +166,11 @@ object UserRegCorrelationApp {
 
    sql(common_join_sql+cguid_query_tail).createOrReplaceTempView("cguid_join")
    sql(common_join_sql+did_query_tail).createOrReplaceTempView("did_join")
-   sql(common_join_sql+xid_query_tail).createOrReplaceTempView("xid_join")   
-
-   //val xid_join_df = sql(common_join_sql+did_query_tail)
+   sql(common_join_sql+did_query_tail).createOrReplaceTempView("xid_join")   
+   val xid_join_df = sql(common_join_sql+did_query_tail)
    
-
-   //val xid_count = xid_join_df.count()x
+   //
+   //println($"the xid join count is  $xid_count")
    //
    //
    //
@@ -228,7 +228,6 @@ object UserRegCorrelationApp {
    coalesce(A.reg_idfa,B.reg_idfa,C.reg_idfa) as reg_idfa,
    coalesce(A.reg_gadid,B.reg_gadid,C.reg_gadid) as reg_gadid,
    coalesce(A.reg_gdid,B.reg_gdid,C.reg_gdid) as reg_gdid,
-   coalesce(A.reg_device_id,B.reg_device_id,C.reg_device_id) as reg_device_id,
    coalesce(A.reg_device_type,B.reg_device_type,C.reg_device_type) as reg_device_type,
    coalesce(A.reg_device_type_level1,B.reg_device_type_level1,C.reg_device_type_level1) as reg_device_type_level1,
    coalesce(A.reg_device_type_level2,B.reg_device_type_level2,C.reg_device_type_level2) as reg_device_type_level2,
@@ -237,19 +236,11 @@ object UserRegCorrelationApp {
    coalesce(A.reg_vi_cnt,B.reg_vi_cnt,C.reg_vi_cnt)   as reg_vi_cnt,
    coalesce(A.reg_incdata_id,B.reg_incdata_id,C.reg_incdata_id) as reg_incdata_id,
    coalesce(A.reg_day_diff,B.reg_day_diff,C.reg_day_diff)        as reg_day_diff,
-   coalesce(A.sec_day_diff,B.sec_day_diff,C.sec_day_diff)  as reg_sec_diff,
+   coalesce(A.sec_day_diff,B.sec_day_diff,C.sec_day_diff)  as sec_day_diff,
    coalesce(A.join_strategy, B.join_strategy, C.join_strategy) as join_strategy,
    coalesce(A.reg_user_cre_dt,B.reg_user_cre_dt,C.reg_user_cre_dt)  as reg_dt,
-   row_number() over(partition by coalesce(A.reg_user_id, B.reg_user_id, C.reg_user_id),
-                                  coalesce(A.event_id, B.event_id, C.event_id) 
-                     order by coalesce(A.device_id, B.device_id, C.device_id) desc,
-                              coalesce(A.experience_level2, B.experience_level2, C.experience_level2),
-                              coalesce(A.flex_column_3, B.flex_column_3, C.flex_column_3),
-                              coalesce(A.flex_column_1, B.flex_column_1, C.flex_column_1)
-   ) as row_numb,  
    coalesce(A.event_dt,B.event_dt,C.event_dt)  as mktng_dt
-
-
+   
    FROM             did_join        A
    FULL OUTER JOIN  cguid_join      B
    ON               A.event_id    = B.event_id
@@ -258,16 +249,15 @@ object UserRegCorrelationApp {
    FULL OUTER JOIN  xid_join        C
    ON               B.event_id    = C.event_id
    and              B.reg_user_id = C.reg_user_id
-
-   where coalesce(A.reg_user_id, B.reg_user_id, C.reg_user_id) is not null
    """ 
    
-   val full_join_df = spark.sql(full_join_sql).filter($"row_numb"===1)
-   
+
+   val full_join_df = spark.sql(full_join_sql)
+
    full_join_df
    .write
    .partitionBy("reg_dt", "mktng_dt")
    .mode(SaveMode.Append)
-   .save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sessions_signedin_mktng__")
+   .save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/registration_mktng_corr")
  }
 }
