@@ -42,13 +42,13 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp {
    // ========================
    // M EVENTS
    // ========================
-   val mktng_path   = s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/marketing_clicks_parquet_bigfiles"
+   val mktng_path   = s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/marketing_clicks_parquet_bigfiles"  //CAMBIAR
    //val mktng_path   = s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/marketing_events_parquet"
 
    // ========================
    // SESSIONS
    // ========================
-   val sess_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sess_cko_bbowa_vi_with_xid"
+   val sess_path = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sess_cko_bbowa_vi_with_xid" //CAMBIAR
    // ========================
 
 
@@ -105,6 +105,8 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp {
    A.flex_column_4,
    A.flex_column_5,
    A.flex_column_6,   
+
+
    B.guid as sess_guid,
    B.cguid as sess_cguid,
    B.parent_uid as sess_parent_uid,
@@ -184,6 +186,10 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp {
 
    sql("select * from mktng    where user_id >0").createOrReplaceTempView("mktng_non_null_uid")
    sql("select * from sess_xid where parent_uid >0").createOrReplaceTempView("sess_xid_non_null_uid")
+
+
+
+
    val uid_query_tail = """
    "uid"                 as mktng_join_strategy
 
@@ -196,6 +202,11 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp {
    and  (unix_timestamp(A.event_ts) <= unix_timestamp(B.start_timestamp) + 600)
    and  (unix_timestamp(B.start_timestamp) -  unix_timestamp(A.event_ts) <= 14*86400)   
    """
+
+
+
+
+
 
 
    val cguid_query_tail = """

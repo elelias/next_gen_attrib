@@ -118,6 +118,7 @@ object Sess_CKO_BBOWA_VI_APP {
    // ========================
    // REGISTRATIONS
    // ========================
+   /*
    val reg_path  = "hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/user_regristration_parquet"
    spark.read.load(reg_path).createOrReplaceTempView("registrations_all")
    val reg_sql = s"""   
@@ -136,6 +137,7 @@ object Sess_CKO_BBOWA_VI_APP {
    cobrand
    """
    spark.sql(reg_sql).createOrReplaceTempView("registrations")
+   */
    // ========================
 
 
@@ -155,7 +157,7 @@ object Sess_CKO_BBOWA_VI_APP {
    sess_cguid,
    sess_site_id,
    sess_cobrand,
-   count(*) as num_txns,
+   count(*) as     num_txns,
    sum(gmb_usd) as gmb_usd,
    sum(IS_FIRST_PURCHASE) as has_first_purchase
 
@@ -274,7 +276,7 @@ object Sess_CKO_BBOWA_VI_APP {
    and         A.session_skey = D.session_skey
    and         A.site_id      = D.site_id
 
-xo   left join   registrations    E
+   left join   registrations    E
    on          A.guid         = E.guid
    and         A.session_skey = E.session_skey
    and         A.site_id      = E.site_id   
@@ -478,6 +480,8 @@ xo   left join   registrations    E
    and               A.session_skey    = D.session_skey   
    """
 
+
+   //SELECT EACH INCDATA_ID ONLY ONCE FOR EVERY SESSION
    val rowNumb = (row_number()
 		.over(Window.partitionBy(col("guid"), col("session_skey"), col("site_id"), col("cobrand"), col("incdata_id"))
 		      .orderBy(col("device_type_level1"), col("device_type_level2"),col("experience_level1"),col("experience_level2"))
