@@ -214,6 +214,7 @@ object Sess_NORBS_CkoBbowaVI_MktngCorrelationApp {
 
    sql("""select * from mktng    where LENGTH(device_id)>=35 and device_id not like '%00000000-0000-0000-0000-000000000000%' """).createOrReplaceTempView("mktng_non_null_did")
    sql("""select * from sess_xid where LENGTH(device_id)>=35 and device_id not like '%00000000-0000-0000-0000-000000000000%' """).createOrReplaceTempView("sess_xid_non_null_did")   
+
    val did_query_tail = """
    "did"                 as mktng_join_strategy
 
