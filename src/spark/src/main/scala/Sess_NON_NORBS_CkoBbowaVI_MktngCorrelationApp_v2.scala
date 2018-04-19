@@ -41,6 +41,7 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
     val sess_end_dt     = args(1)
     val mktng_start_dt  = args(2)
     val norb = args(3).toBoolean // boolean variable
+    val dataType = args(4)
     val mktng_end_dt    = sess_end_dt
 
     // ========================
@@ -54,17 +55,68 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
     // ========================
     // SESSIONS
     // ========================
-    val sess_xid_df = spark.read.parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sessions_data")
+    val sess_df_all = spark.read.parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sessions_data")
+
+    // ========================
+    // XID
+    // ========================
+    val xid_df = spark.read.parquet("x")
+
+    // ========================
+    // DeviceID
+    // ========================
+    val did_df = spark.read.parquet("d")
+
+    // ======================================
+    //FILTER FOR DATES
+    // ======================================
+
+    val sess_df_all_date = sess_df_all
+      .where(($"dt" >= sess_start_dt) && ($"dt" <= sess_end_dt))
+
+    // ======================================
+    val sess_df   = dataType match {
+
+      case 0 => sess_df_all_date
+        .filter($"has_first_purchase" === 0)
+        .sample(false, 0.20)
+      case 1 => sess_df_all_date
+        .filter($"has_first_purchase" > 0)
+      case 2 => {
+        val sess_xid_anon_df = sess_df_all_date
+          .alias("lft")
+          .join(xid_df, Seq("cguid"), "leftanti")
+          .select("lft.*")
+
+        val sess_df_all_did_filtered = sess_df_all_date
+          .where((length($"device_id") >= 35) && ($"device_id" == "%00000000-0000-0000-0000-000000000000%"))
+
+        val sess_did_anon_df = sess_df_all_date
+          .alias("lft")
+          .join(sess_df_all_did_filtered, Seq("device_id"), "leftanti")
+          .select("lft.*")
+
+        sess_xid_anon_df
+          .union(sess_xid_anon_df)
+          .dropDuplicates()
+      }
+      case _ =>
+
+
+    }
+
+
+
 
 
     // ======================================
     //FILTER FOR DATES AND NORB OR NON-NORBS
     // ======================================
-    val sess_df   = if (norb) {
-      sess_xid_df.filter(s"dt between '$sess_start_dt' and '$sess_end_dt' and has_first_purchase = 0").sample(false, 0.20)
+    val sess_df   = if (!norb) {
+      sess_df_all.filter(s"dt between '$sess_start_dt' and '$sess_end_dt' and has_first_purchase = 0").sample(false, 0.20)
     }
     else{
-      sess_xid_df.filter(s"dt between '$sess_start_dt' and '$sess_end_dt' and has_first_purchase > 0")
+      sess_df_all.filter(s"dt between '$sess_start_dt' and '$sess_end_dt' and has_first_purchase > 0")
     }
 
     sess_df.cache()
@@ -216,8 +268,140 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
     """
 
 
+  sql(common_join_sql + cguid_query_tail).createOrReplaceTempView("cguid_join")
+  sql(common_join_sql +  did_query_tail).createOrReplaceTempView("did_join")
 
-  sql(common_join_sql+cguid_query_tail).createOrReplaceTempView("cguid_join")
-//  sql(common_join_sql+  did_query_tail).createOrReplaceTempView("did_join")
+
+    val full_join_sql = """
+   select
+   coalesce(B.guid,C.guid) as guid,
+   coalesce(B.cguid,C.cguid) as cguid,
+   coalesce(B.user_id,C.user_id) as user_id,
+   coalesce(B.event_id,C.event_id) as event_id,
+   coalesce(B.event_id_type,C.event_id_type) as event_id_type,
+   coalesce(B.event_type_id,C.event_type_id) as event_type_id,
+   coalesce(B.channel_id,C.channel_id) as channel_id,
+   coalesce(B.channel_name,C.channel_name) as channel_name,
+   coalesce(B.rotation_id,C.rotation_id) as rotation_id,
+   coalesce(B.rotation_name,C.rotation_name) as rotation_name,
+   coalesce(B.campaign_id,C.campaign_id) as campaign_id,
+   coalesce(B.campaign_name,C.campaign_name) as campaign_name,
+   coalesce(B.event_dt,C.event_dt) as event_dt,
+   coalesce(B.event_ts,C.event_ts) as event_ts,
+   coalesce(B.device_id,C.device_id) as device_id,
+   coalesce(B.experience_level1,C.experience_level1) as experience_level1,
+   coalesce(B.experience_level2,C.experience_level2) as experience_level2,
+   coalesce(B.device_type_level1,C.device_type_level1) as device_type_level1,
+   coalesce(B.device_type_level2,C.device_type_level2) as device_type_level2,
+   coalesce(B.flex_field_map,C.flex_field_map) as flex_field_map,
+   
+   coalesce(B.sess_guid,C.sess_guid) as sess_guid,
+   coalesce(B.sess_cguid,C.sess_cguid) as sess_cguid,
+   coalesce(B.sess_parent_uid,C.sess_parent_uid) as sess_parent_uid,
+   coalesce(B.sess_session_skey,C.sess_session_skey) as sess_session_skey,
+   coalesce(B.sess_site_id,C.sess_site_id) as sess_site_id,
+   coalesce(B.sess_cobrand,C.sess_cobrand) as sess_cobrand,
+   coalesce(B.sess_session_start_dt,C.sess_session_start_dt) as sess_session_start_dt,
+   coalesce(B.sess_start_timestamp,C.sess_start_timestamp) as sess_start_timestamp,
+   coalesce(B.sess_end_timestamp,C.sess_end_timestamp) as sess_end_timestamp,
+   coalesce(B.sess_primary_app_id,C.sess_primary_app_id) as sess_primary_app_id,
+   coalesce(B.sess_session_traffic_source_id,C.sess_session_traffic_source_id) as sess_session_traffic_source_id,
+   coalesce(B.sess_cust_traffic_source_level1,C.sess_cust_traffic_source_level1) as sess_cust_traffic_source_level1,
+   coalesce(B.sess_cust_traffic_source_level2,C.sess_cust_traffic_source_level2) as sess_cust_traffic_source_level2,
+   coalesce(B.sess_traffic_source_level3,C.sess_traffic_source_level3) as sess_traffic_source_level3,
+   coalesce(B.sess_rotation_id,C.sess_rotation_id) as sess_rotation_id,
+   coalesce(B.sess_rvr_id,C.sess_rvr_id) as sess_rvr_id,
+   coalesce(B.sess_idfa,C.sess_idfa) as sess_idfa,
+   coalesce(B.sess_gadid,C.sess_gadid) as sess_gadid,
+   coalesce(B.sess_gdid,C.sess_gdid) as sess_gdid,
+   coalesce(B.sess_device_id,C.sess_device_id) as sess_device_id,
+   coalesce(B.sess_device_type,C.sess_device_type) as sess_device_type,
+   coalesce(B.sess_device_type_level1,C.sess_device_type_level1) as sess_device_type_level1,
+   coalesce(B.sess_device_type_level2,C.sess_device_type_level2) as sess_device_type_level2,
+   coalesce(B.sess_experience_level1,C.sess_experience_level1) as sess_experience_level1,
+   coalesce(B.sess_experience_level2,C.sess_experience_level2) as sess_experience_level2,
+   coalesce(B.sess_lndg_page_id,C.sess_lndg_page_id) as sess_lndg_page_id,
+   coalesce(B.sess_exit_page_id,C.sess_exit_page_id) as sess_exit_page_id,
+   coalesce(B.sess_valid_page_count,C.sess_valid_page_count) as sess_valid_page_count,
+   coalesce(B.sess_gr_cnt,C.sess_gr_cnt) as sess_gr_cnt,
+   coalesce(B.sess_gr_1_cnt,C.sess_gr_1_cnt) as sess_gr_1_cnt,
+   coalesce(B.sess_vi_cnt,C.sess_vi_cnt)                     as sess_vi_cnt,
+   coalesce(B.sess_homepage_cnt,C.sess_homepage_cnt)                     as sess_homepage_cnt,
+   coalesce(B.sess_myebay_cnt,C.sess_myebay_cnt)                     as sess_myebay_cnt,
+   coalesce(B.sess_signin_cnt,C.sess_signin_cnt)                     as sess_signin_cnt,
+   coalesce(B.sess_num_txns,C.sess_num_txns)             as sess_num_txns,
+   coalesce(B.sess_gmb_usd,C.sess_gmb_usd)                 as sess_gmb_usd,
+   coalesce(B.sess_has_first_purchase,C.sess_has_first_purchase) as sess_has_first_purchase,
+   coalesce(B.sess_num_watch,C.sess_num_watch)         as sess_num_watch,
+   coalesce(B.sess_num_ask,C.sess_num_ask)                 as sess_num_ask,
+   coalesce(B.sess_num_ac,C.sess_num_ac)                     as sess_num_ac,
+   coalesce(B.sess_num_bo,C.sess_num_bo)                     as sess_num_bo,
+   coalesce(B.sess_num_bb,C.sess_num_bb)                     as sess_num_bb,
+   coalesce(B.sess_num_bbowa,C.sess_num_bbowa)         as sess_num_bbowa,
+   coalesce(B.sess_num_meta,C.sess_num_meta)             as sess_num_meta,
+   coalesce(B.sess_num_lv2,C.sess_num_lv2)                 as sess_num_lv2,
+   coalesce(B.sess_num_lv3,C.sess_num_lv3)                 as sess_num_lv3,
+   coalesce(B.sess_num_lv4,C.sess_num_lv4)                 as sess_num_lv4,
+   coalesce(B.sess_specificity,C.sess_specificity) as sess_specificity,
+   coalesce(B.sess_specificity_binned,C.sess_specificity_binned) as sess_specificity_binned,
+   coalesce(B.sess_num_fashion,C.sess_num_fashion) as sess_num_fashion,
+   coalesce(B.sess_num_home_garden,C.sess_num_home_garden) as sess_num_home_garden,
+   coalesce(B.sess_num_electronics,C.sess_num_electronics) as sess_num_electronics,
+   coalesce(B.sess_num_collectibles,C.sess_num_collectibles) as sess_num_collectibles,
+   coalesce(B.sess_num_parts_acc,C.sess_num_parts_acc) as sess_num_parts_acc,
+   coalesce(B.sess_num_vehicles,C.sess_num_vehicles) as sess_num_vehicles,
+   coalesce(B.sess_num_lifestyle,C.sess_num_lifestyle) as sess_num_lifestyle,
+   coalesce(B.sess_num_bu_industrial,C.sess_num_bu_industrial) as sess_num_bu_industrial,
+   coalesce(B.sess_num_media,C.sess_num_media) as sess_num_media,
+   coalesce(B.sess_num_real_estate,C.sess_num_real_estate) as sess_num_real_estate,
+   coalesce(B.sess_num_unknown,     C.sess_num_unknown) as sess_num_unknown,
+   coalesce(B.sess_num_clothes_shoes_acc,C.sess_num_clothes_shoes_acc) as sess_num_clothes_shoes_acc,
+   coalesce(B.sess_num_home_furniture,C.sess_num_home_furniture) as sess_num_home_furniture,
+   coalesce(B.sess_num_cars_motors_vehic,C.sess_num_cars_motors_vehic) as sess_num_cars_motors_vehic,
+   coalesce(B.sess_num_cars_p_and_acc,C.sess_num_cars_p_and_acc) as sess_num_cars_p_and_acc,
+   coalesce(B.sess_num_sporting_goods,C.sess_num_sporting_goods) as sess_num_sporting_goods,
+   coalesce(B.sess_num_toys_games,C.sess_num_toys_games) as sess_num_toys_games,
+   coalesce(B.sess_num_health_beauty,C.sess_num_health_beauty) as sess_num_health_beauty,
+   coalesce(B.sess_num_mob_phones,C.sess_num_mob_phones) as sess_num_mob_phones,
+   coalesce(B.sess_num_business_ind,C.sess_num_business_ind) as sess_num_business_ind,
+   coalesce(B.sess_num_baby,C.sess_num_baby) as sess_num_baby,
+   coalesce(B.sess_num_jewellry_watches,C.sess_num_jewellry_watches) as sess_num_jewellry_watches,
+   coalesce(B.sess_num_computers,C.sess_num_computers) as sess_num_computers,
+   coalesce(B.sess_num_modellbau,C.sess_num_modellbau) as sess_num_modellbau,
+   coalesce(B.sess_num_antiquities,C.sess_num_antiquities) as sess_num_antiquities,
+   coalesce(B.sess_num_sound_vision,C.sess_num_sound_vision) as sess_num_sound_vision,
+   coalesce(B.sess_num_video_games_consoles, C.sess_num_video_games_consoles) as sess_num_video_games_consoles,
+
+   coalesce(B.day_diff,C.day_diff) as day_diff,
+   coalesce(B.sec_diff,C.sec_diff) as sec_diff,
+   coalesce(B.mktng_join_strategy,C.mktng_join_strategy) as mktng_join_strategy,
+   coalesce(B.sess_session_start_dt, C.sess_session_start_dt) as sess_dt,
+   coalesce(B.event_dt, C.event_dt) as mktng_dt
+   FROM             did_join                B
+   FULL OUTER JOIN  cguid_join              C
+   ON               B.event_id           =  C.event_id
+   AND              B.sess_guid          =  C.sess_guid
+   AND              B.sess_session_skey  =  C.sess_session_skey
+
+   """
+
+    val rNumb = row_number()
+      .over(Window.partitionBy(col("sess_guid"), col("sess_session_skey"), col("event_id"))
+        .orderBy(col("device_type_level1"), col("device_type_level2"), col("experience_level1"), col("experience_level2"))
+      )
+
+    val full_join_df = spark
+      .sql(full_join_sql)
+      .withColumn("rnum", rNumb)
+      .filter($"rnum"===1)
+
+
+    full_join_df
+      .write
+      .partitionBy("sess_dt", "mktng_dt")
+      .mode(SaveMode.Append)
+      .save(s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sess_norbs_cko_bbowa_vi_mktng_corr_$sess_start_dt")
+
+
     }
 }
