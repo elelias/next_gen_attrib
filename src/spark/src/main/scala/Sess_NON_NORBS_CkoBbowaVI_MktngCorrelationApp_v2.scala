@@ -2,6 +2,9 @@ import org.apache.spark.sql.SparkSession
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.expressions.Window
+import org.apache.hadoop.fs.FileSystem
+import org.apache.hadoop.fs.Path
+import java.sql.Date
 
 /* ***************************
 
@@ -10,7 +13,15 @@ import org.apache.spark.sql.expressions.Window
 --conf spark.yarn.am.extraJavaOptions="-Dhdp.version=2.4.2.0-258" --conf spark.driver.extraJavaOptions="-Dhdp.version=2.4.2.0-258" \
   --conf spark.yarn.access.namenodes=hdfs://apollo-phx-nn-ha  --queue hddq-other-fin  \
   --conf spark.yarn.appMasterEnv.SPARK_HOME=/apache/spark-2.1.1-bin-hadoop2.7/bin/spark-submit --num-executors 1000 \
-  --driver-memory 30g --executor-memory 30g /tmp/correlation_2.11-1.0.jar "2018-04-14" "2018-04-14" "2018-04-14" "true"
+  --driver-memory 30g --executor-memory 30g /tmp/correlation_2.11-1.0.jar "2018-04-14" "2018-04-14" "2018-04-06" "norb"
+
+
+When running in Spades from Apollo :
+
+/home/eron/anaconda2/bin/python -c "import send_spark as ss; send_template = '''/usr/hdp/current/spark-2.1.0-bin-hadoop2.7/bin/spark-submit  --class Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 --master yarn --deploy-mode cluster  --conf spark.yarn.am.extraJavaOptions="-Dhdp.version=2.4.2.0-258" --conf spark.driver.extraJavaOptions="-Dhdp.version=2.4.2.0-258" --conf spark.yarn.access.namenodes=hdfs://apollo-phx-nn-ha  --queue hddq-other-fin  --conf spark.yarn.appMasterEnv.SPARK_HOME=/usr/hdp/current/spark-2.1.0-bin-hadoop2.7/bin/spark-submit --num-executors 1000 --driver-memory 30g --executor-memory 30g /home/adeabreu/session_mktng_corr_2.11-1.0.jar "2018-04-15" "2018-04-15" "2018-04-15" "norb" '''; stdin, stdout, stderr= ss.run_spark_on_spades(send_template)"
+
+
+
 
  *************************** */
 
@@ -28,102 +39,109 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
     sc.setLogLevel("ERROR")
     Logger.getLogger("org").setLevel(Level.ERROR)
 
-    println("broadcast threshold is "+spark.conf.get("spark.sql.autoBroadcastJoinThreshold").toInt / 1024 / 1024 )
-
 
     import spark.implicits._
     import spark.sql
     import org.apache.spark.sql.SaveMode
 
 
-
     val sess_start_dt   = args(0)
     val sess_end_dt     = args(1)
     val mktng_start_dt  = args(2)
-    val norb = args(3).toBoolean // boolean variable
-    val dataType = args(4)
+    val session_type = args(3)
     val mktng_end_dt    = sess_end_dt
 
-    // ========================
+    //To avoid appending on the same file, first check if the file exist
+//    val hadoopfs: FileSystem = FileSystem.get(spark.sparkContext.hadoopConfiguration)
+//
+//    if (!testDirExist(s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sess_mktng_corr/session_type=$session_type/sess_dt=$sess_start_dt")(hadoopfs))
+//      throw new Exception(s"The file for a $session_type session and date $sess_start_dt already exist!")
+
+
+//    val mktngDates = Seq()
+//    val results = mktngDates.
+//      map(mktngDate => spark.read.parquet(s"hdfs://apollo-phx-nn-ha/apps/hdmi-technology/b_marketing_ep_infr/production/MARKETING_EVENT/MARKETING_EVENT/0/0/dt=$mktngDate")).
+//      reduce(_.union(_))
+
 
 
     // ========================
     // M EVENTS
     // ========================
-    val mevents_df   = spark.read.parquet("hdfs://apollo-phx-nn-ha/apps/hdmi-technology/b_marketing_ep_infr/production/MARKETING_EVENT/MARKETING_EVENT/0/0/")
+    val mevents_df   = spark.read.parquet(s"hdfs://apollo-phx-nn-ha/apps/hdmi-technology/b_marketing_ep_infr/production/MARKETING_EVENT/MARKETING_EVENT/0/0/")
 
     // ========================
     // SESSIONS
     // ========================
     val sess_df_all = spark.read.parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sessions_data")
 
-    // ========================
-    // XID
-    // ========================
-    val xid_df = spark.read.parquet("x")
+    // =================================================
+    // XID - only needed to get the anonymous sessions
+    // =================================================
+    val cguid_df = spark.read.parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/incdata_cguid_to_xid_count_parquet")
 
-    // ========================
-    // DeviceID
-    // ========================
-    val did_df = spark.read.parquet("d")
+    // =====================================================
+    // DeviceID - only needed to get the anonymous sessions
+    // =====================================================
+    val did_df = spark.read.parquet("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/incdata_did_to_xid_count_parquet")
 
     // ======================================
-    //FILTER FOR DATES
+    // FILTER DATES & MKTNG CLICKS
     // ======================================
 
     val sess_df_all_date = sess_df_all
       .where(($"dt" >= sess_start_dt) && ($"dt" <= sess_end_dt))
 
-    // ======================================
-    val sess_df   = dataType match {
+    val mktng_df = mevents_df
+//      .where(($"dt" >= "2018-04-20") && ($"dt" <= "2018-04-20"))
+      .where(($"dt" >= mktng_start_dt) && ($"dt" <= mktng_end_dt))
+      .where(("event_type_id in (1,5,8)"))
 
-      case 0 => sess_df_all_date
+//    val mktng_df = mevents_df.filter(s"dt between '$mktng_start_dt' and '$mktng_end_dt' and event_type_id in (1,5,8)")
+
+
+    // ==========================================
+    // GET NORBS NON-NORBS OR ANONYMOUS SESSIONS
+    // ==========================================
+
+    val sess_df   = session_type match {
+
+      case "nonnorb" => sess_df_all_date
         .filter($"has_first_purchase" === 0)
         .sample(false, 0.20)
-      case 1 => sess_df_all_date
+
+      case "norb" => sess_df_all_date
         .filter($"has_first_purchase" > 0)
-      case 2 => {
-        val sess_xid_anon_df = sess_df_all_date
+
+      case "anonymous" => {
+
+        val sess_cguid_anon_df = sess_df_all_date
           .alias("lft")
-          .join(xid_df, Seq("cguid"), "leftanti")
+          .join(cguid_df, Seq("cguid"), "leftanti")
           .select("lft.*")
 
-        val sess_df_all_did_filtered = sess_df_all_date
-          .where((length($"device_id") >= 35) && ($"device_id" == "%00000000-0000-0000-0000-000000000000%"))
+        // device_id ="0...0" is excluded for join computational complexity reasons
+        val sess_df_all_did_filtered = sess_cguid_anon_df
+          .where((length($"device_id") >= 35) && ($"device_id" != "%00000000-0000-0000-0000-000000000000%"))
 
-        val sess_did_anon_df = sess_df_all_date
+        val sub_non_zero_sess_did_anon_df = sess_df_all_did_filtered
           .alias("lft")
-          .join(sess_df_all_did_filtered, Seq("device_id"), "leftanti")
+          .join(did_df, $"device_id"===$"did", "leftanti")
           .select("lft.*")
 
-        sess_xid_anon_df
-          .union(sess_xid_anon_df)
-          .dropDuplicates()
+        // We need to add back sessions with the device_id ="0...0" that were in sess_cguid_anon_df, and they are not in did_df!
+        val sub_zero_sess_did_anon_df = sess_cguid_anon_df
+          .where(($"device_id" === "%00000000-0000-0000-0000-000000000000%"))
+
+        sub_non_zero_sess_did_anon_df
+          .union(sub_zero_sess_did_anon_df)
+          .dropDuplicates() //There shouldn't be duplicates!
+
       }
-      case _ =>
-
+      case _ => throw new IllegalArgumentException("Last argument should be: 'norb', 'nonnorb' or 'anonymous' ")
 
     }
 
-
-
-
-
-    // ======================================
-    //FILTER FOR DATES AND NORB OR NON-NORBS
-    // ======================================
-    val sess_df   = if (!norb) {
-      sess_df_all.filter(s"dt between '$sess_start_dt' and '$sess_end_dt' and has_first_purchase = 0").sample(false, 0.20)
-    }
-    else{
-      sess_df_all.filter(s"dt between '$sess_start_dt' and '$sess_end_dt' and has_first_purchase > 0")
-    }
-
-    sess_df.cache()
-    println("the count of transactions is " + sess_df.count())
-
-    //TAKE ONLY CLICKS
-    val mktng_df = mevents_df.filter(s"dt between '$mktng_start_dt' and '$mktng_end_dt' and event_type_id in (1,5,8)")
 
     sess_df.createOrReplaceTempView("sess_xid")
     mktng_df.createOrReplaceTempView("mktng")
@@ -234,7 +252,6 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
    (unix_timestamp(B.start_timestamp) - unix_timestamp(A.event_ts))/86400. as day_diff,
    (unix_timestamp(B.start_timestamp) - unix_timestamp(A.event_ts))        as sec_diff,
    """
-
 
 
     val cguid_query_tail = """
@@ -395,13 +412,17 @@ object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
       .withColumn("rnum", rNumb)
       .filter($"rnum"===1)
 
-
     full_join_df
+      .withColumn("session_type", lit(session_type))
       .write
-      .partitionBy("sess_dt", "mktng_dt")
+      .partitionBy("session_type", "sess_dt", "mktng_dt")
       .mode(SaveMode.Append)
-      .save(s"hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sess_norbs_cko_bbowa_vi_mktng_corr_$sess_start_dt")
-
+      .save("hdfs://apollo-phx-nn-ha/user/hive/warehouse/mktng.db/sess_mktng_corr")
 
     }
+
+//  def testDirExist(path: String)(hadoopfs: FileSystem): Boolean = {
+//      val p = new Path(path)
+//       hadoopfs.exists(p) && hadoopfs.getFileStatus(p).isDirectory
+//  }
 }
