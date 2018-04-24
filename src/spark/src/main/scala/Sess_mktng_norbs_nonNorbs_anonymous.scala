@@ -26,7 +26,7 @@ When running in Spades from Apollo :
  *************************** */
 
 
-object Sess_NON_NORBS_CkoBbowaVI_MktngCorrelationApp_v2 {
+object Sess_mktng_norbs_nonNorbs_anonymous {
 
   def main(args: Array[String]): Unit = {
 
