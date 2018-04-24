@@ -19,6 +19,7 @@ object ChannelEventAnalysisApp {
     /*
 	Select relevant marketing-related info from the table. 
     */
+   
     val marketing_info = sql("""select
     distinct
     coalesce(transaction_id, -1) as transaction_id,
@@ -34,6 +35,7 @@ object ChannelEventAnalysisApp {
     coalesce(fm_buyer_type_cd, -1) as fm_buyer_type_cd,
     coalesce(fm_buyer_type_desc, -1) as fm_buyer_type_desc,
     coalesce(is_first_purchase, -1) as is_first_purchase,
+    coalesce(bbowa_device_type, 'unknown') as bbowa_device_type,
     created_dt,
     coalesce(gmb_usd, 0) as gmb_usd,
     concat(
